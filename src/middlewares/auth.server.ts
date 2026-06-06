@@ -1,0 +1,1223 @@
+/**
+ * Copyright 2026 Salesforce, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+    createContext,
+    type MiddlewareFunction,
+    type RouterContextProvider,
+    type ActionFunctionArgs,
+} from 'react-router';
+import { type AuthResponse, AuthTokenInvalidError } from '@salesforce/storefront-next-runtime/scapi';
+import type { SessionData as AuthData } from '@/lib/api/types';
+import { clearStorage, type StorageErrorData, unpackStorage } from '@/lib/middleware';
+import {
+    authContext,
+    authStorageContext,
+    type AuthStorageData,
+    createAuthPromise,
+    updateAuthStorageData,
+    updateStorageAndCache,
+    getSLASAccessTokenClaims,
+    getCustomerIdFromClaims,
+    isTrackingConsentEnabled,
+    AUTH_TOKEN_INVALID_ERROR,
+    COOKIE_REFRESH_TOKEN_GUEST,
+    COOKIE_REFRESH_TOKEN_REGISTERED,
+    COOKIE_ACCESS_TOKEN,
+    COOKIE_USID,
+    COOKIE_CUSTOMER_ID,
+    COOKIE_ENC_USER_ID,
+    COOKIE_IDP_ACCESS_TOKEN,
+    COOKIE_CODE_VERIFIER,
+    COOKIE_TRACKING_CONSENT,
+    COOKIE_DWSID,
+    COOKIE_AUTH_RECOVERY_GUARD,
+} from '@/middlewares/auth.utils';
+import { getAppOrigin, isAbsoluteURL } from '@/lib/utils';
+import { getLogger } from '@/lib/logger.server';
+import { createApiClients } from '@/lib/api-clients.server';
+import { performanceTimerContext, PERFORMANCE_MARKS } from '@/middlewares/performance-metrics';
+import { getConfig } from '@salesforce/storefront-next-runtime/config';
+import type { AppConfig } from '@/types/config';
+import { createCookie, getCookieConfig, getCookieNameWithSiteId, parseAllCookies } from '@/lib/cookie-utils.server';
+import { getTranslation, getLocale } from '@salesforce/storefront-next-runtime/i18n';
+import { TrackingConsent, trackingConsentToBoolean } from '@/types/tracking-consent';
+import { SHOPPER_CONTEXT_COOKIE_NAME_BASE, SOURCE_CODE_COOKIE_NAME_BASE } from '@/lib/shopper-context-constants';
+
+/**
+ * Refresh access token using refresh token.
+ * Returns AuthResponse which includes dwsid (automatically extracted from Set-Cookie header by SDK).
+ */
+export async function refreshAccessToken(
+    context: Readonly<RouterContextProvider>,
+    refreshToken: string,
+    options?: { trackingConsent?: TrackingConsent }
+): Promise<AuthResponse> {
+    const logger = getLogger(context);
+    const clients = createApiClients(context);
+    const performanceTimer = context.get(performanceTimerContext);
+    performanceTimer?.mark(PERFORMANCE_MARKS.authRefreshAccessToken, 'start');
+
+    // Get tracking consent from options if provided, otherwise read from auth context (populated from cookies by middleware)
+    // Only process tracking consent if the feature is enabled in config
+    let trackingConsent: TrackingConsent | undefined = options?.trackingConsent;
+    if (trackingConsent === undefined && isTrackingConsentEnabled(context)) {
+        try {
+            const authData = getAuth(context);
+            trackingConsent = authData.trackingConsent;
+        } catch {
+            // If getAuth fails (e.g., middleware not initialized), trackingConsent remains undefined
+        }
+    }
+
+    logger.debug('Auth: refreshAccessToken starting', {
+        hasTrackingConsent: trackingConsent !== undefined,
+    });
+
+    try {
+        const result = await clients.auth.refreshToken({
+            refreshToken,
+            // Convert TrackingConsent enum to boolean for SLAS API
+            ...(trackingConsent !== undefined && { dnt: trackingConsentToBoolean(trackingConsent) }),
+        });
+        logger.debug('Auth: refreshAccessToken succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: refreshAccessToken failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(PERFORMANCE_MARKS.authRefreshAccessToken, 'end');
+    }
+}
+
+/**
+ * Login as guest user.
+ * Returns AuthResponse which includes dwsid (automatically extracted from Set-Cookie header by SDK).
+ * The SDK handles auth flow selection internally when proxyHost is configured.
+ */
+export async function loginGuestUser(
+    context: Readonly<RouterContextProvider>,
+    options?: { usid?: string }
+): Promise<AuthResponse> {
+    const logger = getLogger(context);
+    const clients = createApiClients(context);
+    const performanceTimer = context.get(performanceTimerContext);
+    const appConfig = getConfig<AppConfig>(context);
+    const isSlasPrivate = appConfig.commerce.api.privateKeyEnabled;
+    const performanceName = isSlasPrivate
+        ? PERFORMANCE_MARKS.authLoginGuestUserPrivate
+        : PERFORMANCE_MARKS.authLoginGuestUser;
+    performanceTimer?.mark(performanceName, 'start');
+
+    logger.debug('Auth: loginGuestUser starting', {
+        hasUsid: !!options?.usid,
+        isSlasPrivate,
+    });
+
+    try {
+        // SDK handles auth flow selection internally when proxyHost is configured
+        const result = await clients.auth.loginAsGuest({ usid: options?.usid });
+        logger.debug('Auth: loginGuestUser succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: loginGuestUser failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(performanceName, 'end');
+    }
+}
+
+/**
+ * Login as registered user with email and password.
+ * Returns AuthResponse which includes dwsid (automatically extracted from Set-Cookie header by SDK).
+ */
+export async function loginRegisteredUser(
+    context: Readonly<RouterContextProvider>,
+    email: string,
+    password: string,
+    _options?: { customParameters?: Record<string, unknown> }
+): Promise<AuthResponse> {
+    const logger = getLogger(context);
+    const clients = createApiClients(context);
+    const performanceTimer = context.get(performanceTimerContext);
+    const { usid } = getAuth(context);
+
+    // Get tracking consent from auth context (populated from cookies by middleware)
+    // This ensures existing tracking consent preference from guest session propagates to registered user session
+    // Only process tracking consent if the feature is enabled in config
+    let trackingConsent: TrackingConsent | undefined;
+    if (isTrackingConsentEnabled(context)) {
+        try {
+            const authData = getAuth(context);
+            trackingConsent = authData.trackingConsent;
+        } catch {
+            // If getAuth fails (e.g., middleware not initialized), trackingConsent remains undefined
+        }
+    }
+
+    performanceTimer?.mark(PERFORMANCE_MARKS.authLoginRegisteredUser, 'start');
+
+    logger.debug('Auth: loginRegisteredUser starting', {
+        hasUsid: !!usid,
+        hasTrackingConsent: trackingConsent !== undefined,
+    });
+
+    try {
+        const result = await clients.auth.loginWithCredentials({
+            username: email,
+            password,
+            usid: usid ? String(usid) : undefined,
+            // Convert TrackingConsent enum to boolean for SLAS API
+            ...(trackingConsent !== undefined && { dnt: trackingConsentToBoolean(trackingConsent) }),
+        });
+        logger.debug('Auth: loginRegisteredUser succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: loginRegisteredUser failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(PERFORMANCE_MARKS.authLoginRegisteredUser, 'end');
+    }
+}
+
+/**
+ * Authorize passwordless login - sends magic link via email
+ */
+export async function authorizePasswordless(
+    context: ActionFunctionArgs['context'],
+    parameters: {
+        userid: string;
+        callbackUri?: string;
+        redirectPath?: string;
+    }
+) {
+    const performanceTimer = context.get(performanceTimerContext);
+    performanceTimer?.mark(PERFORMANCE_MARKS.authAuthorizePasswordless, 'start');
+
+    const clients = createApiClients(context);
+    const session = getAuth(context);
+    const userId = parameters.userid;
+
+    const appConfig = getConfig<AppConfig>(context);
+    const passwordlessCallback = appConfig.features.passwordlessLogin.callbackUri;
+    const mode = appConfig.features.passwordlessLogin.mode;
+
+    let baseCallbackUri: string | undefined;
+
+    if (parameters.callbackUri) {
+        baseCallbackUri = parameters.callbackUri;
+    } else if (passwordlessCallback) {
+        baseCallbackUri = isAbsoluteURL(passwordlessCallback)
+            ? passwordlessCallback
+            : `${getAppOrigin()}${passwordlessCallback}`;
+    }
+
+    const finalCallbackUri =
+        baseCallbackUri && parameters.redirectPath
+            ? `${baseCallbackUri}?redirectUrl=${encodeURIComponent(parameters.redirectPath)}`
+            : baseCallbackUri;
+
+    const usid = session.usid;
+
+    const locale = getLocale(context);
+
+    const logger = getLogger(context);
+    logger.debug('Auth: authorizePasswordless starting', { mode });
+
+    try {
+        const result = await clients.auth.passwordless.authorize({
+            userId,
+            callbackUri: finalCallbackUri,
+            usid: usid ? String(usid) : undefined,
+            mode,
+            ...(locale && { locale }),
+        });
+        logger.debug('Auth: authorizePasswordless succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: authorizePasswordless failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(PERFORMANCE_MARKS.authAuthorizePasswordless, 'end');
+    }
+}
+
+/**
+ * Request password reset token - sends magic link via email
+ */
+export async function getPasswordResetToken(
+    context: ActionFunctionArgs['context'],
+    parameters: {
+        email: string;
+    }
+) {
+    const performanceTimer = context.get(performanceTimerContext);
+    performanceTimer?.mark(PERFORMANCE_MARKS.authGetPasswordResetToken, 'start');
+
+    const clients = createApiClients(context);
+    const appConfig = getConfig<AppConfig>(context);
+    const resetPasswordCallbackUri = appConfig.features.resetPassword.callbackUri;
+    let callbackUri: string | undefined;
+    if (resetPasswordCallbackUri) {
+        callbackUri = isAbsoluteURL(resetPasswordCallbackUri)
+            ? resetPasswordCallbackUri
+            : `${getAppOrigin()}${resetPasswordCallbackUri}`;
+    }
+
+    const mode = appConfig.features.resetPassword.mode;
+
+    const locale = getLocale(context);
+
+    const logger = getLogger(context);
+    logger.debug('Auth: getPasswordResetToken starting', { mode });
+
+    try {
+        const result = await clients.auth.password.requestReset({
+            userId: parameters.email,
+            callbackUri,
+            mode,
+            ...(locale && { locale }),
+        });
+        logger.debug('Auth: getPasswordResetToken succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: getPasswordResetToken failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(PERFORMANCE_MARKS.authGetPasswordResetToken, 'end');
+    }
+}
+
+/**
+ * Reset password using token from magic link
+ */
+export async function resetPasswordWithToken(
+    context: ActionFunctionArgs['context'],
+    parameters: {
+        email: string;
+        token: string;
+        newPassword: string;
+    }
+) {
+    const performanceTimer = context.get(performanceTimerContext);
+    performanceTimer?.mark(PERFORMANCE_MARKS.authResetPasswordWithToken, 'start');
+
+    const logger = getLogger(context);
+    const clients = createApiClients(context);
+
+    logger.debug('Auth: resetPasswordWithToken starting');
+
+    try {
+        const result = await clients.auth.password.reset({
+            userId: parameters.email,
+            token: parameters.token,
+            newPassword: parameters.newPassword,
+        });
+        logger.debug('Auth: resetPasswordWithToken succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: resetPasswordWithToken failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(PERFORMANCE_MARKS.authResetPasswordWithToken, 'end');
+    }
+}
+
+/**
+ * Get passwordless access token using the token from magic link.
+ * Returns AuthResponse which includes dwsid (automatically extracted from Set-Cookie header by SDK).
+ */
+export async function getPasswordLessAccessToken(
+    context: Readonly<RouterContextProvider>,
+    pwdlessLoginToken: string
+): Promise<AuthResponse> {
+    const clients = createApiClients(context);
+    const performanceTimer = context.get(performanceTimerContext);
+    const session = getAuth(context);
+    const usid = session.usid;
+    performanceTimer?.mark(PERFORMANCE_MARKS.authGetPasswordLessAccessToken, 'start');
+
+    // Get tracking consent from auth context (populated from cookies by middleware)
+    // This ensures existing tracking consent preference from guest session propagates to registered user session
+    // Only process tracking consent if the feature is enabled in config
+    let dnt: boolean | undefined;
+    if (isTrackingConsentEnabled(context)) {
+        try {
+            const authData = getAuth(context);
+            if (authData.trackingConsent) {
+                dnt = trackingConsentToBoolean(authData.trackingConsent);
+            }
+        } catch {
+            // If getAuth fails (e.g., middleware not initialized), dnt remains undefined
+        }
+    }
+
+    const logger = getLogger(context);
+    logger.debug('Auth: getPasswordLessAccessToken starting', {
+        hasUsid: !!usid,
+    });
+
+    try {
+        const result = await clients.auth.passwordless.exchangeToken({
+            pwdlessLoginToken,
+            usid: usid ? String(usid) : undefined,
+            ...(dnt !== undefined && { dnt }),
+        });
+        logger.debug('Auth: getPasswordLessAccessToken succeeded');
+        return result;
+    } catch (error) {
+        logger.error('Auth: getPasswordLessAccessToken failed', { error });
+        throw error;
+    } finally {
+        performanceTimer?.mark(PERFORMANCE_MARKS.authGetPasswordLessAccessToken, 'end');
+    }
+}
+
+/**
+ * Server-side utility to retrieve/verify the validity of stored Commerce API auth information.
+ * Validates access token expiry using the expiry injected from JWT during middleware initialization.
+ */
+type AuthAction = 'tokenValid' | 'tokenRefreshed' | 'guestLogin';
+
+const retrieveAuthStorageData = async (
+    context: Readonly<RouterContextProvider>,
+    storage: Map<keyof AuthStorageData, AuthStorageData[keyof AuthStorageData]>,
+    cache: { ref: AuthData | undefined }
+): Promise<AuthAction> => {
+    const { t } = getTranslation(context);
+    const logger = getLogger(context);
+
+    const accessToken = storage.get('accessToken');
+    const accessTokenExpiry = storage.get('accessTokenExpiry');
+    const refreshToken = storage.get('refreshToken');
+    const performanceTimer = context.get(performanceTimerContext);
+
+    // Check if access token exists and is not expired
+    // We use the expiry injected from JWT during middleware initialization for fast comparison
+    if (
+        accessToken &&
+        typeof accessToken === 'string' &&
+        accessToken.length &&
+        typeof accessTokenExpiry === 'number' &&
+        accessTokenExpiry > Date.now()
+    ) {
+        logger.debug('Auth: access token valid', {
+            expiresIn: Math.round((accessTokenExpiry - Date.now()) / 1000),
+        });
+        return 'tokenValid';
+    }
+    // Token missing or expired - proceed to refresh flow below
+
+    // If access token missing but refresh token exists, use it to get new access token
+    if (typeof refreshToken === 'string' && refreshToken.length) {
+        const storedUserType = storage.get('userType');
+        const userType: 'guest' | 'registered' = storedUserType === 'registered' ? 'registered' : 'guest';
+        logger.debug('Auth: access token expired or missing, refreshing', { userType });
+        try {
+            // Use refresh token operation and update storage/cache
+            performanceTimer?.mark(PERFORMANCE_MARKS.authRefreshToken, 'start');
+            const tokenResponse = await refreshAccessToken(context, refreshToken);
+            performanceTimer?.mark(PERFORMANCE_MARKS.authRefreshToken, 'end');
+            await updateStorageAndCache(context, storage, cache, tokenResponse, userType);
+            logger.info('Auth: token refreshed', { userType });
+            return 'tokenRefreshed';
+        } catch (error) {
+            // Invalid/expired refresh token: clear tokens and fall back to guest login
+            logger.warn('Auth: refresh token failed, falling back to guest login', { error, userType });
+            storage.set('error', t('errors:accessTokenRefreshFailed'));
+        }
+    }
+
+    // Otherwise, get a new guest token (fallback for users not logged in)
+    // Note: Registered users should log in through `/login` action, not here
+    const storedUsid = storage.get('usid');
+    const hasUsid = typeof storedUsid === 'string' && storedUsid.length > 0;
+    logger.debug('Auth: no valid tokens, performing guest login', { hasUsid });
+    try {
+        const usid = typeof storedUsid === 'string' ? storedUsid : undefined;
+
+        // Use guest login operation and update storage/cache
+        performanceTimer?.mark(PERFORMANCE_MARKS.authGuestLogin, 'start');
+        const tokenResponse = await loginGuestUser(context, {
+            usid: typeof usid === 'string' && usid.length ? usid : undefined,
+        });
+        performanceTimer?.mark(PERFORMANCE_MARKS.authGuestLogin, 'end');
+        await updateStorageAndCache(context, storage, cache, tokenResponse, 'guest');
+        logger.info('Auth: guest session created');
+        return 'guestLogin';
+    } catch (error) {
+        logger.error('Auth: guest login failed', { error });
+        storage.set('error', t('errors:guestAccessTokenFailed'));
+        return 'guestLogin';
+    }
+};
+
+// Cookie names for split auth storage are imported from auth.utils
+// IMPORTANT: Only ONE refresh token cookie should exist at a time
+// - cc-nx-g: Guest users (cookie name encodes user type)
+// - cc-nx: Registered users (cookie name encodes user type)
+
+/**
+ * Type guard for auth-token invalidation errors thrown by the SCAPI client.
+ */
+const isAuthTokenInvalidError = (error: unknown): error is Error =>
+    error instanceof Error && error.name === 'AuthTokenInvalidError';
+
+/**
+ * Reset any stale error state and remove access-token related data to force recovery.
+ */
+const resetRecoveryStorageState = (authStorage: Map<keyof AuthStorageData, AuthStorageData[keyof AuthStorageData]>) => {
+    authStorage.delete('error');
+    authStorage.delete('accessToken');
+    authStorage.delete('accessTokenExpiry');
+    authStorage.delete('idpAccessToken');
+    authStorage.delete('idpAccessTokenExpiry');
+};
+
+/**
+ * Recover from a 401 by forcing a refresh/guest login and redirecting the request.
+ * Returns the redirect response and a flag used to set the recovery guard cookie.
+ */
+const handleAuthTokenInvalidation = async ({
+    request,
+    context,
+    authStorage,
+    authCache,
+    hasAuthRecoveryGuard,
+    error,
+}: {
+    request: Request;
+    context: Readonly<RouterContextProvider>;
+    authStorage: Map<keyof AuthStorageData, AuthStorageData[keyof AuthStorageData]>;
+    authCache: { ref: AuthData | undefined };
+    hasAuthRecoveryGuard: boolean;
+    error: unknown;
+}): Promise<{ response: Response; authRecoveryTriggered: boolean }> => {
+    const logger = getLogger(context);
+
+    // Guard against loops: if we already redirected once, surface the error.
+    if (hasAuthRecoveryGuard) {
+        logger.error('Auth: token invalidation recovery blocked by guard', { error });
+        throw error;
+    }
+
+    // Clear stale error/access-token state so refresh/guest flow can run cleanly.
+    resetRecoveryStorageState(authStorage);
+
+    // Refresh before redirect so the next request arrives with fresh cookies,
+    // and to fail fast if recovery is not possible (avoid a pointless redirect).
+    await retrieveAuthStorageData(context, authStorage, authCache).catch(() => {
+        // Intentionally empty
+    });
+
+    // If recovery failed, rethrow so ErrorBoundary can handle it.
+    if (authStorage.has('error')) {
+        logger.error('Auth: token invalidation recovery failed', { error });
+        throw error;
+    }
+
+    logger.info('Auth: token invalidation recovery succeeded, redirecting');
+
+    // Restart the request lifecycle with fresh auth cookies.
+    return {
+        authRecoveryTriggered: true,
+        response: new Response(null, {
+            status: 307,
+            headers: {
+                Location: request.url,
+                // Observability only: marks recovery redirect in logs/debugging.
+                'x-sfnext-auth-recovery': '1',
+            },
+        }),
+    };
+};
+
+const authCacheContext = createContext<{ ref: AuthData | undefined }>();
+
+/**
+ * Middleware to retrieve or refresh the Commerce API token and provide it as part of the router `context`.
+ *
+ * This middleware is tailored for server-side use only! It uses separate cookies to store different parts of the
+ * authentication information:
+ * - `cc-nx-g`: Guest user refresh token (expires after configured period, browser auto-deletes)
+ * - `cc-nx`: Registered user refresh token (expires after configured period, browser auto-deletes)
+ * - `cc-at`: Access token (expires after 30 min, browser auto-deletes)
+ * - `usid`: User session ID (expires with refresh token)
+ * - `customerId`: Customer ID (expires with refresh token)
+ * - `cc-idp-at`: IDP access token (for social login, expires with SLAS access token)
+ * - `cc-cv`: OAuth2 PKCE code verifier (server-only httpOnly cookie, short-lived, 5 min expiry)
+ *
+ * User type is determined by which refresh token cookie exists (cc-nx-g = guest, cc-nx = registered).
+ * Only one refresh token cookie exists at a time - a user cannot be both guest and registered.
+ *
+ * All cookies use httpOnly: true to prevent client-side JavaScript access (XSS protection).
+ * ECOM hybrid storefronts can still read cookies from the incoming request headers server-side.
+ *
+ * Cookie configuration can be overridden via getCookieConfig using environment variables.
+ *
+ * Token validation flow:
+ * - If access token exists and not expired (checked via JWT decode) → use it
+ * - If access token missing/expired but refresh token exists → refresh to get new access token
+ * - If both missing → guest login
+ *
+ * The router context is available in other middlewares, loader and action functions. Use it as root middleware,
+ * to ensure the Commerce API context portion becomes available throughout the whole application.
+ */
+const authMiddleware: MiddlewareFunction<Response> = async ({ request, context }, next) => {
+    const logger = getLogger(context);
+    logger.debug('Auth middleware: start');
+    // Before calling the handler: Load current Commerce API data from incoming cookies, if applicable
+    const cookieConfig = getCookieConfig({ httpOnly: true }, context);
+    const cookieHeader = request.headers.get('Cookie');
+
+    // Parse cookie header once (not 5 times) for optimal performance
+    const allCookies = parseAllCookies(cookieHeader);
+
+    // Extract auth cookies from parsed map (no decoding/JSON parsing)
+    const getAuthCookie = (name: string): string | null => {
+        const namespacedName = getCookieNameWithSiteId(name, context);
+        return allCookies[namespacedName] || null;
+    };
+
+    const refreshTokenGuest = getAuthCookie(COOKIE_REFRESH_TOKEN_GUEST);
+    const refreshTokenRegistered = getAuthCookie(COOKIE_REFRESH_TOKEN_REGISTERED);
+    const accessToken = getAuthCookie(COOKIE_ACCESS_TOKEN);
+    const usid = getAuthCookie(COOKIE_USID);
+    const customerId = getAuthCookie(COOKIE_CUSTOMER_ID);
+    const encUserId = getAuthCookie(COOKIE_ENC_USER_ID);
+    const idpAccessToken = getAuthCookie(COOKIE_IDP_ACCESS_TOKEN);
+    const codeVerifier = getAuthCookie(COOKIE_CODE_VERIFIER);
+    const dwsid = getAuthCookie(COOKIE_DWSID);
+    const authRecoveryGuard = getAuthCookie(COOKIE_AUTH_RECOVERY_GUARD);
+    const hasAuthRecoveryGuard = authRecoveryGuard === '1';
+    // Read tracking consent cookie directly as TrackingConsent enum (values match)
+    const trackingConsentCookieValue = getAuthCookie(COOKIE_TRACKING_CONSENT);
+    let trackingConsent: TrackingConsent | undefined =
+        trackingConsentCookieValue === TrackingConsent.Accepted ||
+        trackingConsentCookieValue === TrackingConsent.Declined
+            ? trackingConsentCookieValue
+            : undefined;
+
+    // Track if we need to delete the tracking consent cookie due to mismatch
+    let hasTrackingConsentMismatch = false;
+    // Track if customer ID from access token differs from cookie (hybrid storefront session change)
+    let hasCustomerIdMismatch = false;
+
+    // Create cookie instances for serialization (Set-Cookie headers)
+    const refreshTokenGuestCookie = createCookie<string>(COOKIE_REFRESH_TOKEN_GUEST, cookieConfig, context);
+    const refreshTokenRegisteredCookie = createCookie<string>(COOKIE_REFRESH_TOKEN_REGISTERED, cookieConfig, context);
+    const accessTokenCookie = createCookie<string>(COOKIE_ACCESS_TOKEN, cookieConfig, context);
+    const usidCookie = createCookie<string>(COOKIE_USID, cookieConfig, context);
+    const customerIdCookie = createCookie<string>(COOKIE_CUSTOMER_ID, cookieConfig, context);
+    const encUserIdCookie = createCookie<string>(COOKIE_ENC_USER_ID, cookieConfig, context);
+    const idpAccessTokenCookie = createCookie<string>(COOKIE_IDP_ACCESS_TOKEN, cookieConfig, context);
+    const dwsidCookie = createCookie<string>(COOKIE_DWSID, cookieConfig, context);
+    const authRecoveryCookie = createCookie<string>(COOKIE_AUTH_RECOVERY_GUARD, cookieConfig, context);
+    // Code verifier cookie is httpOnly for security (OAuth2 PKCE flow, server-only)
+    const codeVerifierCookie = createCookie<string>(
+        COOKIE_CODE_VERIFIER,
+        getCookieConfig({ httpOnly: true }, context),
+        context
+    );
+    const trackingConsentCookie = createCookie<string>(COOKIE_TRACKING_CONSENT, cookieConfig, context);
+    const shopperContextCookie = createCookie<string>(SHOPPER_CONTEXT_COOKIE_NAME_BASE, cookieConfig, context);
+    const sourceCodeCookie = createCookie<string>(SOURCE_CODE_COOKIE_NAME_BASE, cookieConfig, context);
+
+    // Determine user type and refresh token from which cookie exists
+    // Only one should exist at a time (guest and registered are mutually exclusive)
+    //
+    // IMPORTANT: userType is NEVER written to cookies. It is ALWAYS derived at runtime
+    // from which refresh token cookie exists:
+    // - cc-nx exists → registered user
+    // - cc-nx-g exists → guest user
+    // - neither exists → fallback to guest
+    //
+    // userType is stored in authStorage/authCache for easy in-app access,
+    // and is set explicitly during login flows for in-memory state management.
+    let userType: 'guest' | 'registered';
+    let refreshToken: string | null;
+
+    if (refreshTokenRegistered) {
+        // cc-nx exists → user is registered
+        userType = 'registered';
+        refreshToken = refreshTokenRegistered;
+    } else if (refreshTokenGuest) {
+        // cc-nx-g exists → user is guest
+        userType = 'guest';
+        refreshToken = refreshTokenGuest;
+    } else {
+        // No refresh token exists - will fallback to guest login
+        userType = 'guest';
+        refreshToken = null;
+    }
+
+    logger.debug('Auth middleware: cookies parsed', {
+        userType,
+        hasRefreshToken: !!refreshToken,
+        hasAccessToken: !!accessToken,
+        hasUsid: !!usid,
+    });
+
+    // Reconstruct authData from individual cookies
+    // Note: expiry times are NOT persisted in cookies - they're derived from JWT tokens at runtime
+    // This decodes once during middleware initialization for fast numeric comparison later
+    const authData: Partial<AuthStorageData> = {};
+    if (refreshToken) authData.refreshToken = refreshToken;
+
+    // Decode access token claims once for expiry, tracking consent, and customer ID
+    const claims = accessToken ? getSLASAccessTokenClaims(accessToken) : null;
+    if (accessToken) {
+        authData.accessToken = accessToken;
+        if (claims?.expiry) authData.accessTokenExpiry = claims.expiry;
+
+        // Validate tracking consent value from token matches cookie - if they differ, mark cookie for deletion
+        // Only validate if tracking consent feature is enabled
+        if (isTrackingConsentEnabled(context) && claims?.trackingConsent !== null && trackingConsent !== undefined) {
+            if (claims?.trackingConsent !== trackingConsent) {
+                logger.info('Auth middleware: tracking consent mismatch detected', {
+                    tokenConsent: claims?.trackingConsent,
+                    cookieConsent: trackingConsentCookieValue,
+                });
+                trackingConsent = undefined;
+                hasTrackingConsentMismatch = true;
+            }
+        }
+    }
+    if (usid) authData.usid = usid;
+    // Derive customer ID from access token isb claim (source of truth for hybrid storefronts)
+    // Falls back to cookie value if token is absent or claim cannot be parsed
+    if (claims) {
+        const tokenCustomerId = getCustomerIdFromClaims(claims, userType);
+        if (tokenCustomerId) {
+            authData.customerId = tokenCustomerId;
+            if (tokenCustomerId !== customerId) {
+                hasCustomerIdMismatch = true;
+                logger.info('Auth middleware: customer ID mismatch detected');
+            }
+        } else if (customerId) {
+            authData.customerId = customerId;
+        }
+    } else if (customerId) {
+        authData.customerId = customerId;
+    }
+    if (encUserId) authData.encUserId = encUserId;
+    // Add IDP access token for social login (if present)
+    if (idpAccessToken) authData.idpAccessToken = idpAccessToken;
+    // Add code verifier for OAuth2 PKCE flow (if present)
+    if (codeVerifier) authData.codeVerifier = codeVerifier;
+    // Add dwsid for hybrid storefronts (if present)
+    if (dwsid) authData.dwsid = dwsid;
+    // Add tracking consent value from cookie (if present and valid)
+    // Note: trackingConsent may be undefined if it doesn't match token, which will cause cookie deletion
+    if (trackingConsent !== undefined) authData.trackingConsent = trackingConsent;
+    // Add userType to in-memory storage (NOT written to cookies)
+    authData.userType = userType;
+
+    const authStorage = new Map<keyof AuthStorageData, AuthStorageData[keyof AuthStorageData]>(
+        Object.entries(authData) as [keyof AuthStorageData, AuthStorageData[keyof AuthStorageData]][]
+    );
+
+    // Mark storage as updated if tracking consent or customer ID mismatch was detected
+    // This ensures the response section runs and writes corrected cookies
+    if (hasTrackingConsentMismatch || hasCustomerIdMismatch) {
+        authStorage.set('isUpdated', true);
+    }
+
+    // Create auth cache instance per request. On the server it's crucial to not create a singleton cache instance!
+    const authCache: { ref: AuthData | undefined } = { ref: authData as AuthData };
+    const authPromiseCache: { ref: Promise<AuthData | undefined> } = { ref: Promise.resolve(authData as AuthData) };
+
+    // Write Commerce API data to request `context` to make it available to other middleware, loaders, or actions
+    context.set(authContext, authPromiseCache);
+    context.set(authStorageContext, authStorage);
+    context.set(authCacheContext, authCache);
+
+    // Before calling the handler: Verify existing Commerce API auth data or retrieve new information
+    let authAction: AuthAction | undefined;
+    await retrieveAuthStorageData(context, authStorage, authCache)
+        .then((action) => {
+            authAction = action;
+        })
+        .catch((error) => {
+            logger.warn('Auth middleware: retrieveAuthStorageData failed', { error });
+        });
+
+    let response: Response;
+    let authRecoveryTriggered = false;
+
+    // Execute handler (loader/action/render)
+    try {
+        response = await next();
+    } catch (error) {
+        // Only handle auth-token invalidation; everything else should bubble.
+        if (!isAuthTokenInvalidError(error)) {
+            throw error;
+        }
+
+        logger.warn('Auth middleware: token invalidation detected, attempting recovery', {
+            hasRecoveryGuard: hasAuthRecoveryGuard,
+        });
+
+        // Run the recovery flow and build the redirect response.
+        const recovery = await handleAuthTokenInvalidation({
+            request,
+            context,
+            authStorage,
+            authCache,
+            hasAuthRecoveryGuard,
+            error,
+        });
+
+        // Persist recovery state for response cookie handling below.
+        authRecoveryTriggered = recovery.authRecoveryTriggered;
+        response = recovery.response;
+        logger.debug('Auth middleware: recovery redirect issued');
+    }
+
+    const storedAuthError = authStorage.get('error');
+    if (storedAuthError === AUTH_TOKEN_INVALID_ERROR) {
+        logger.warn('Auth middleware: deferred token invalidation error, attempting recovery', {
+            hasRecoveryGuard: hasAuthRecoveryGuard,
+        });
+        authStorage.delete('error');
+        const recovery = await handleAuthTokenInvalidation({
+            request,
+            context,
+            authStorage,
+            authCache,
+            hasAuthRecoveryGuard,
+            error: new AuthTokenInvalidError(),
+        });
+        authRecoveryTriggered = recovery.authRecoveryTriggered;
+        response = recovery.response;
+    }
+
+    // After calling the handler: Write back storage data and cookies, if required
+    if (authStorage.has('isDestroyed') || authStorage.has('error')) {
+        logger.warn('Auth middleware: session destroyed or errored, clearing all auth cookies', {
+            isDestroyed: authStorage.has('isDestroyed'),
+            hasError: authStorage.has('error'),
+        });
+        // Clean up the storage container. That way the information is immediately updated for eventually
+        // running middlewares after this one as well.
+        clearStorage(authStorage, false);
+        authCache.ref = undefined;
+        authPromiseCache.ref = createAuthPromise(context, authCache.ref);
+
+        // Destroy all auth cookies (both refresh token cookies to ensure clean state)
+        const deleteCookieConfig = getCookieConfig(
+            {
+                maxAge: undefined,
+                expires: new Date(0),
+            },
+            context
+        );
+        const deleteHttpOnlyCookieConfig = getCookieConfig(
+            {
+                httpOnly: true,
+                maxAge: undefined,
+                expires: new Date(0),
+            },
+            context
+        );
+
+        response.headers.append('Set-Cookie', await refreshTokenGuestCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await refreshTokenRegisteredCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await accessTokenCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await usidCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await customerIdCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await encUserIdCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await idpAccessTokenCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await dwsidCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await codeVerifierCookie.serialize('', deleteHttpOnlyCookieConfig));
+        response.headers.append('Set-Cookie', await trackingConsentCookie.serialize('', deleteCookieConfig));
+        response.headers.append('Set-Cookie', await shopperContextCookie.serialize('', deleteHttpOnlyCookieConfig));
+        response.headers.append('Set-Cookie', await sourceCodeCookie.serialize('', deleteHttpOnlyCookieConfig));
+    } else if (authStorage.has('isUpdated')) {
+        logger.debug('Auth middleware: auth storage updated, writing cookies');
+        // Clean up storage container metadata
+        authStorage.delete('isUpdated');
+
+        // Update the stored data in separate cookies
+        const entry = Object.fromEntries(authStorage);
+        authCache.ref = entry;
+        authPromiseCache.ref = createAuthPromise(context, entry);
+
+        // Get expiry times (calculated from token response) and user type
+        const accessTokenExpiryValue = authStorage.get('accessTokenExpiry') as number | undefined;
+        const refreshTokenExpiryValue = authStorage.get('refreshTokenExpiry') as number | undefined;
+        const userTypeValue = authStorage.get('userType') as 'guest' | 'registered' | undefined;
+
+        // Set refresh token cookie with refresh token expiry
+        // Use correct cookie name based on user type (cc-nx-g for guest, cc-nx for registered)
+        //
+        // NOTE: userType itself is NOT written to cookies - only the refresh token is written
+        // to the appropriate cookie name (cc-nx-g or cc-nx). On next request, userType will
+        // be derived from which cookie exists.
+        const refreshTokenValue = authStorage.get('refreshToken');
+        if (refreshTokenValue && typeof refreshTokenValue === 'string' && refreshTokenExpiryValue && userTypeValue) {
+            const refreshTokenCookie =
+                userTypeValue === 'guest' ? refreshTokenGuestCookie : refreshTokenRegisteredCookie;
+
+            // Delete the other refresh token cookie to ensure only one exists
+            const otherRefreshTokenCookie =
+                userTypeValue === 'guest' ? refreshTokenRegisteredCookie : refreshTokenGuestCookie;
+
+            const deleteCookieConfig = getCookieConfig(
+                {
+                    maxAge: undefined,
+                    expires: new Date(0),
+                },
+                context
+            );
+
+            response.headers.append('Set-Cookie', await otherRefreshTokenCookie.serialize('', deleteCookieConfig));
+
+            // Set the correct refresh token cookie
+            response.headers.append(
+                'Set-Cookie',
+                await refreshTokenCookie.serialize(
+                    refreshTokenValue,
+                    getCookieConfig(
+                        {
+                            expires: new Date(refreshTokenExpiryValue),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set access token cookie with access token expiry
+        const accessTokenValue = authStorage.get('accessToken');
+        if (accessTokenValue && typeof accessTokenValue === 'string' && accessTokenExpiryValue) {
+            response.headers.append(
+                'Set-Cookie',
+                await accessTokenCookie.serialize(
+                    accessTokenValue,
+                    getCookieConfig(
+                        {
+                            expires: new Date(accessTokenExpiryValue),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set usid cookie with refresh token expiry (same as refresh token)
+        const usidValue = authStorage.get('usid');
+        if (usidValue && typeof usidValue === 'string' && refreshTokenExpiryValue) {
+            response.headers.append(
+                'Set-Cookie',
+                await usidCookie.serialize(
+                    usidValue,
+                    getCookieConfig(
+                        {
+                            expires: new Date(refreshTokenExpiryValue),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set customerId cookie with refresh token expiry (same as refresh token)
+        // Falls back to access token expiry when refresh token expiry is unavailable
+        // (e.g., when only a customer ID mismatch triggered the update, not a token refresh)
+        const customerIdValue = authStorage.get('customerId');
+        const customerIdCookieExpiry = refreshTokenExpiryValue ?? accessTokenExpiryValue;
+        if (customerIdValue && typeof customerIdValue === 'string' && customerIdCookieExpiry) {
+            response.headers.append(
+                'Set-Cookie',
+                await customerIdCookie.serialize(
+                    customerIdValue,
+                    getCookieConfig(
+                        {
+                            expires: new Date(customerIdCookieExpiry),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set encUserId cookie with refresh token expiry (same as refresh token)
+        const encUserIdValue = authStorage.get('encUserId');
+        if (encUserIdValue && typeof encUserIdValue === 'string' && refreshTokenExpiryValue) {
+            response.headers.append(
+                'Set-Cookie',
+                await encUserIdCookie.serialize(
+                    encUserIdValue,
+                    getCookieConfig(
+                        {
+                            expires: new Date(refreshTokenExpiryValue),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set IDP access token cookie with access token expiry (for social login)
+        const idpAccessTokenValue = authStorage.get('idpAccessToken');
+        const idpAccessTokenExpiryValue = authStorage.get('idpAccessTokenExpiry') as number | undefined;
+        if (idpAccessTokenValue && typeof idpAccessTokenValue === 'string' && idpAccessTokenExpiryValue) {
+            response.headers.append(
+                'Set-Cookie',
+                await idpAccessTokenCookie.serialize(
+                    idpAccessTokenValue,
+                    getCookieConfig(
+                        {
+                            expires: new Date(idpAccessTokenExpiryValue),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set dwsid cookie as session cookie (for hybrid storefronts)
+        // No explicit expiry - cookie is deleted when browser closes
+        const dwsidValue = authStorage.get('dwsid');
+        if (dwsidValue && typeof dwsidValue === 'string') {
+            response.headers.append(
+                'Set-Cookie',
+                await dwsidCookie.serialize(dwsidValue, getCookieConfig({}, context))
+            );
+        }
+
+        // Set code verifier cookie with short expiry (OAuth2 PKCE flow, ephemeral)
+        // This cookie is httpOnly for security and has a 5-minute expiry
+        const codeVerifierValue = authStorage.get('codeVerifier');
+        if (codeVerifierValue && typeof codeVerifierValue === 'string') {
+            const codeVerifierExpiry = Date.now() + 5 * 60 * 1_000; // 5 minutes from now
+            response.headers.append(
+                'Set-Cookie',
+                await codeVerifierCookie.serialize(
+                    codeVerifierValue,
+                    getCookieConfig(
+                        {
+                            httpOnly: true,
+                            expires: new Date(codeVerifierExpiry),
+                        },
+                        context
+                    )
+                )
+            );
+        } else {
+            // If codeVerifier was removed from storage (e.g., after successful social login),
+            // explicitly delete the cookie immediately rather than waiting for expiry
+            response.headers.append(
+                'Set-Cookie',
+                await codeVerifierCookie.serialize(
+                    '',
+                    getCookieConfig(
+                        {
+                            httpOnly: true,
+                            maxAge: undefined,
+                            expires: new Date(0),
+                        },
+                        context
+                    )
+                )
+            );
+        }
+
+        // Set or delete tracking consent cookie (only if tracking consent feature is enabled)
+        // TrackingConsent enum values match cookie format directly ('0' or '1')
+        if (isTrackingConsentEnabled(context)) {
+            const trackingConsentValue = authStorage.get('trackingConsent');
+            if (
+                trackingConsentValue === TrackingConsent.Accepted ||
+                trackingConsentValue === TrackingConsent.Declined
+            ) {
+                // Set tracking consent cookie as session cookie (no expiry)
+                // Enum value is already in correct format ('0' or '1')
+                response.headers.append(
+                    'Set-Cookie',
+                    await trackingConsentCookie.serialize(trackingConsentValue, getCookieConfig({}, context))
+                );
+            } else {
+                // Delete tracking consent cookie if it was invalidated (e.g., didn't match token)
+                // Check if cookie exists in request to avoid unnecessary deletion
+                const requestTrackingConsent = getAuthCookie(COOKIE_TRACKING_CONSENT);
+                if (requestTrackingConsent) {
+                    response.headers.append(
+                        'Set-Cookie',
+                        await trackingConsentCookie.serialize(
+                            '',
+                            getCookieConfig(
+                                {
+                                    maxAge: undefined,
+                                    expires: new Date(0),
+                                },
+                                context
+                            )
+                        )
+                    );
+                }
+            }
+        }
+    }
+
+    if (authRecoveryTriggered) {
+        response.headers.append(
+            'Set-Cookie',
+            await authRecoveryCookie.serialize(
+                '1',
+                getCookieConfig(
+                    {
+                        maxAge: 30,
+                    },
+                    context
+                )
+            )
+        );
+    }
+
+    if (hasAuthRecoveryGuard) {
+        response.headers.append(
+            'Set-Cookie',
+            await authRecoveryCookie.serialize(
+                '',
+                getCookieConfig(
+                    {
+                        maxAge: undefined,
+                        expires: new Date(0),
+                    },
+                    context
+                )
+            )
+        );
+        response.headers.set('x-sfnext-auth-recovery-guard', '1');
+    }
+
+    logger.debug('Auth middleware: complete', {
+        userType: (authStorage.get('userType') as string) ?? 'unknown',
+        authAction,
+        authRecoveryTriggered,
+        hasError: authStorage.has('error'),
+        isDestroyed: authStorage.has('isDestroyed'),
+    });
+
+    return response;
+};
+
+export const getAuth = (context: Readonly<RouterContextProvider>): AuthData & StorageErrorData => {
+    const storage = context.get(authStorageContext);
+    const cache = context.get(authCacheContext);
+    if (!storage || !cache) {
+        throw new Error('getAuth must be used within the Commerce API middleware');
+    }
+    return cache.ref ?? unpackStorage<AuthData>(storage);
+};
+
+export const updateAuth = (
+    context: Readonly<RouterContextProvider>,
+    updater: AuthResponse | ((data: AuthData & StorageErrorData) => AuthData & StorageErrorData)
+) => {
+    const storage = context.get(authStorageContext);
+    const cache = context.get(authCacheContext);
+    const promiseCache = context.get(authContext);
+    const appConfig = getConfig<AppConfig>(context);
+    if (!storage || !cache || !promiseCache) {
+        throw new Error('updateAuth must be used within the Commerce API middleware');
+    }
+
+    // Update storage data
+    updateAuthStorageData(storage, updater, appConfig);
+    cache.ref = storage.has('error') ? undefined : unpackStorage<AuthData>(storage);
+    promiseCache.ref = storage.has('error')
+        ? createAuthPromise(context, undefined)
+        : createAuthPromise(context, cache.ref);
+};
+
+export const destroyAuth = (context: Readonly<RouterContextProvider>): void => {
+    const storage = context.get(authStorageContext);
+    const cache = context.get(authCacheContext);
+    const promiseCache = context.get(authContext);
+    if (!storage || !cache || !promiseCache) {
+        throw new Error('destroyAuth must be used within the Commerce API middleware');
+    }
+
+    // Unset storage data
+    clearStorage(storage);
+    cache.ref = undefined;
+    promiseCache.ref = createAuthPromise(context, cache.ref);
+
+    // Mark storage as destroyed
+    storage.set('isDestroyed', true);
+};
+
+export const flashAuth = (context: Readonly<RouterContextProvider>, message?: string): void => {
+    const storage = context.get(authStorageContext);
+    const cache = context.get(authCacheContext);
+    const promiseCache = context.get(authContext);
+    if (!storage || !cache || !promiseCache) {
+        throw new Error('flashAuth must be used within the Commerce API middleware');
+    }
+
+    // Unset storage data
+    clearStorage(storage);
+    cache.ref = undefined;
+    promiseCache.ref = createAuthPromise(context, cache.ref);
+
+    // Set the error message
+    storage.set('error', message ?? '');
+};
+
+/**
+ * Clear invalid session and restore a fresh guest session.
+ * This is useful when a customer is deleted or session is corrupted.
+ * Cookies are deleted via the 'isDestroyed' flag, which triggers
+ * the middleware's response section to send Set-Cookie deletion headers.
+ */
+export const clearInvalidSessionAndRestoreGuest = async (context: Readonly<RouterContextProvider>): Promise<void> => {
+    const logger = getLogger(context);
+    const { t } = getTranslation();
+    const storage = context.get(authStorageContext);
+    const cache = context.get(authCacheContext);
+    const promiseCache = context.get(authContext);
+
+    if (!storage || !cache || !promiseCache) {
+        throw new Error('clearInvalidSessionAndRestoreGuest must be used within auth middleware');
+    }
+
+    logger.info('Auth: clearing invalid session and restoring guest');
+
+    // Clear in-memory storage and cache
+    clearStorage(storage);
+    cache.ref = undefined;
+
+    try {
+        // Get new guest session (no usid - start completely fresh)
+        const tokenResponse = await loginGuestUser(context, { usid: undefined });
+        await updateStorageAndCache(context, storage, cache, tokenResponse, 'guest');
+        promiseCache.ref = createAuthPromise(context, cache.ref);
+
+        // Mark for destruction - triggers cookie deletion in response section
+        storage.set('isDestroyed', true);
+        logger.info('Auth: guest session restored successfully');
+    } catch (error) {
+        // If guest login fails, still mark for destruction and set error
+        storage.set('isDestroyed', true);
+        storage.set('error', t('errors:guestAccessTokenFailed'));
+        logger.error('Auth: guest session restore failed', { error });
+        throw error;
+    }
+};
+
+export default authMiddleware;

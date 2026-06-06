@@ -1,0 +1,130 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RegisterCustomerSelection stories snapshot > Checked story renders and matches snapshot 1`] = `
+<div
+  class="w-full max-w-2xl mx-auto p-6"
+  data-register-harness="true"
+>
+  <div
+    data-testid="register-customer-checkbox"
+  >
+    <label
+      class="flex cursor-pointer items-start gap-2 border border-input p-4"
+      for="create-account-checkbox"
+    >
+      <button
+        aria-checked="false"
+        aria-label="Save for Future Use"
+        class="peer border-input dark:bg-input/30 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive size-4 rounded-[4px] border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 mt-0.5 shrink-0"
+        data-slot="checkbox"
+        data-state="unchecked"
+        data-testid="create-account-checkbox"
+        id="create-account-checkbox"
+        role="checkbox"
+        type="button"
+        value="on"
+      />
+      <div
+        class="flex flex-1 flex-col gap-1 text-sm"
+      >
+        <span
+          class="font-medium leading-5 text-foreground"
+        >
+          Save for Future Use
+        </span>
+        <span
+          class="leading-5 text-foreground"
+        >
+          Create an account for a faster checkout next time
+        </span>
+      </div>
+    </label>
+  </div>
+</div>
+`;
+
+exports[`RegisterCustomerSelection stories snapshot > Default story renders and matches snapshot 1`] = `
+<div
+  class="w-full max-w-2xl mx-auto p-6"
+  data-register-harness="true"
+>
+  <div
+    data-testid="register-customer-checkbox"
+  >
+    <label
+      class="flex cursor-pointer items-start gap-2 border border-input p-4"
+      for="create-account-checkbox"
+    >
+      <button
+        aria-checked="false"
+        aria-label="Save for Future Use"
+        class="peer border-input dark:bg-input/30 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive size-4 rounded-[4px] border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 mt-0.5 shrink-0"
+        data-slot="checkbox"
+        data-state="unchecked"
+        data-testid="create-account-checkbox"
+        id="create-account-checkbox"
+        role="checkbox"
+        type="button"
+        value="on"
+      />
+      <div
+        class="flex flex-1 flex-col gap-1 text-sm"
+      >
+        <span
+          class="font-medium leading-5 text-foreground"
+        >
+          Save for Future Use
+        </span>
+        <span
+          class="leading-5 text-foreground"
+        >
+          Create an account for a faster checkout next time
+        </span>
+      </div>
+    </label>
+  </div>
+</div>
+`;
+
+exports[`RegisterCustomerSelection stories snapshot > WithCallback story renders and matches snapshot 1`] = `
+<div
+  class="w-full max-w-2xl mx-auto p-6"
+  data-register-harness="true"
+>
+  <div
+    data-testid="register-customer-checkbox"
+  >
+    <label
+      class="flex cursor-pointer items-start gap-2 border border-input p-4"
+      for="create-account-checkbox"
+    >
+      <button
+        aria-checked="false"
+        aria-label="Save for Future Use"
+        class="peer border-input dark:bg-input/30 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive size-4 rounded-[4px] border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 mt-0.5 shrink-0"
+        data-slot="checkbox"
+        data-state="unchecked"
+        data-testid="create-account-checkbox"
+        id="create-account-checkbox"
+        role="checkbox"
+        type="button"
+        value="on"
+      />
+      <div
+        class="flex flex-1 flex-col gap-1 text-sm"
+      >
+        <span
+          class="font-medium leading-5 text-foreground"
+        >
+          Save for Future Use
+        </span>
+        <span
+          class="leading-5 text-foreground"
+        >
+          Create an account for a faster checkout next time
+        </span>
+      </div>
+    </label>
+  </div>
+</div>
+`;

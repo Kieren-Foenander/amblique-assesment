@@ -1,0 +1,18 @@
+{
+  "homepage/desktop": {},
+  "plp/desktop": {},
+  "pdp/desktop": {},
+  "search/desktop": {},
+  "cart/desktop": {},
+  "checkout/desktop": {},
+  "login/desktop": {},
+  "signup/desktop": {},
+  "homepage/mobile": {},
+  "plp/mobile": {},
+  "pdp/mobile": {},
+  "search/mobile": {},
+  "cart/mobile": {},
+  "checkout/mobile": {},
+  "login/mobile": {},
+  "signup/mobile": {}
+}

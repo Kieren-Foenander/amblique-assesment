@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CartItemEditButton stories snapshot > InCartItem story renders and matches snapshot 1`] = `null`;
+
+exports[`CartItemEditButton stories snapshot > WithCustomStyling story renders and matches snapshot 1`] = `null`;

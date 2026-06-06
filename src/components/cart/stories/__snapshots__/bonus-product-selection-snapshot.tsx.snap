@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`BonusProductSelection stories snapshot > CombinedProducts story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
+
+exports[`BonusProductSelection stories snapshot > Default story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
+
+exports[`BonusProductSelection stories snapshot > WithCarouselNavigation story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;

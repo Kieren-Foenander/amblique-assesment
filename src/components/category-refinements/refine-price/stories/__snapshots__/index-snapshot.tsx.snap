@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RefinePrice stories snapshot > Default story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
+
+exports[`RefinePrice stories snapshot > NoPredefinedRanges story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
+
+exports[`RefinePrice stories snapshot > WithPriceInUrl story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;

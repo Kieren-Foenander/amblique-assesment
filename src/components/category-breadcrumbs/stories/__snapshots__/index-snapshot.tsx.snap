@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CategoryBreadcrumbs stories snapshot > DeepHierarchy story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
+
+exports[`CategoryBreadcrumbs stories snapshot > Default story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
+
+exports[`CategoryBreadcrumbs stories snapshot > SingleCategory story renders and matches snapshot 1`] = `
+<h2>
+  Unexpected Application Error!
+</h2>
+`;
