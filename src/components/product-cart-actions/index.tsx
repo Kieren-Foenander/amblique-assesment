@@ -23,6 +23,8 @@ import { useCheckAndExecutePendingAction } from '@/hooks/check-and-execute-pendi
 import { useTranslation } from 'react-i18next';
 import { UITarget } from '@/targets/ui-target';
 import BuyNowPayLater from '@/components/buy-now-pay-later';
+import StickyAction from '@/components/sticky-action';
+import AddToCartAction from './add-to-cart-action';
 
 const ExpressPayments = lazy(() => import('@/components/checkout/components/express-payments'));
 
@@ -171,14 +173,26 @@ export default function ProductCartActions({
 
                 {/* Standard layout: single Add to Cart / Update button */}
                 {!isCompactAddMode && !isProductASet && !isProductABundle && (
-                    <Button
-                        data-testid="add-to-cart"
-                        onClick={() => void onAddOrUpdateToCart()}
-                        disabled={!canAddToCart || isAddingToOrUpdatingCart}
-                        className="w-full"
-                        size="lg">
-                        {isEditMode ? t('updateCart') : isAddingToOrUpdatingCart ? t('addingToCart') : t('addToCart')}
-                    </Button>
+                    <>
+                        {isEditMode ? (
+                            <Button
+                                data-testid="add-to-cart"
+                                onClick={() => void onAddOrUpdateToCart()}
+                                disabled={!canAddToCart || isAddingToOrUpdatingCart}
+                                className="w-full"
+                                size="lg">
+                                {t('updateCart')}
+                            </Button>
+                        ) : (
+                            <StickyAction>
+                                <AddToCartAction
+                                    product={product}
+                                    onCartSuccess={onCartSuccess}
+                                    onCartError={onCartError}
+                                />
+                            </StickyAction>
+                        )}
+                    </>
                 )}
 
                 {/* Express Payments — standard layout only, vertical for PDP */}
