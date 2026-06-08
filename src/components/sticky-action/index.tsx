@@ -13,17 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-    createContext,
-    Fragment,
-    type PropsWithChildren,
-    use,
-    useEffect,
-    useReducer,
-    useRef,
-    useSyncExternalStore,
-} from 'react';
+import { createContext, Fragment, type PropsWithChildren, use, useEffect, useReducer, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useMediaQuery } from '@/hooks/use-media-query';
 import { cn } from '@/lib/utils';
 
 type StickyActionMode = 'inline' | 'sticky';
@@ -39,18 +31,6 @@ const initialStickyActionState: StickyActionState = {
     hasBeenSeen: false,
     isStickyVisible: false,
 };
-
-const subscribeToMobileQuery = (onStoreChange: () => void) => {
-    if (typeof window.matchMedia === 'undefined') return () => undefined;
-
-    const mediaQuery = window.matchMedia(mobileMediaQuery);
-    mediaQuery.addEventListener('change', onStoreChange);
-    return () => mediaQuery.removeEventListener('change', onStoreChange);
-};
-
-const getMobileSnapshot = () =>
-    typeof window.matchMedia === 'undefined' ? true : window.matchMedia(mobileMediaQuery).matches;
-const getMobileServerSnapshot = () => false;
 
 const stickyActionReducer = (
     state: StickyActionState,
@@ -80,7 +60,7 @@ export const useStickyActionMode = () => use(StickyActionModeContext);
 export default function StickyAction({ children }: PropsWithChildren) {
     const inlineRef = useRef<HTMLDivElement | null>(null);
     const stickyRef = useRef<HTMLDivElement | null>(null);
-    const isMobile = useSyncExternalStore(subscribeToMobileQuery, getMobileSnapshot, getMobileServerSnapshot);
+    const isMobile = useMediaQuery(mobileMediaQuery, { fallbackValue: true });
     const [{ hasBeenSeen, isStickyVisible }, dispatch] = useReducer(stickyActionReducer, initialStickyActionState);
 
     useEffect(() => {

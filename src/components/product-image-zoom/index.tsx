@@ -18,7 +18,6 @@ import {
     useEffect,
     useRef,
     useState,
-    useSyncExternalStore,
     type CSSProperties,
     type KeyboardEvent,
     type MouseEvent,
@@ -27,6 +26,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { DynamicImage } from '@/components/dynamic-image';
 import type { ProductImage } from '@/components/image-gallery';
+import { useMediaQuery } from '@/hooks/use-media-query';
 import { usePinchZoom } from '@/hooks/use-pinch-zoom';
 import { cn } from '@/lib/utils';
 
@@ -41,20 +41,6 @@ const HOVER_SCALE = 2;
 const KEYBOARD_SCALE = 1.5;
 const FINE_POINTER_QUERY = '(hover: hover) and (pointer: fine)';
 
-function subscribeToFinePointer(callback: () => void): () => void {
-    const mediaQuery = globalThis.matchMedia?.(FINE_POINTER_QUERY);
-    mediaQuery?.addEventListener('change', callback);
-    return () => mediaQuery?.removeEventListener('change', callback);
-}
-
-function getFinePointerSnapshot(): boolean {
-    return globalThis.matchMedia?.(FINE_POINTER_QUERY).matches ?? false;
-}
-
-function getFinePointerServerSnapshot(): boolean {
-    return false;
-}
-
 export default function ProductImageZoom({
     images,
     selectedImageIndex,
@@ -65,11 +51,7 @@ export default function ProductImageZoom({
     const containerRef = useRef<HTMLDivElement>(null);
     const transformRef = useRef<HTMLDivElement>(null);
     const animationFrameRef = useRef<number | null>(null);
-    const isFinePointer = useSyncExternalStore(
-        subscribeToFinePointer,
-        getFinePointerSnapshot,
-        getFinePointerServerSnapshot
-    );
+    const isFinePointer = useMediaQuery(FINE_POINTER_QUERY);
     const [isHoverZoomed, setIsHoverZoomed] = useState(false);
     const [isKeyboardZoomed, setIsKeyboardZoomed] = useState(false);
     const [isFocused, setIsFocused] = useState(false);

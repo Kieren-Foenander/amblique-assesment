@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { createContext, type PropsWithChildren, useCallback, useContext, useSyncExternalStore } from 'react';
+import { createContext, type PropsWithChildren, useCallback, useContext } from 'react';
 import type { NavigateFunction } from 'react-router';
 import { useNavigate } from '@/hooks/use-navigate';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +24,7 @@ import { useConfig } from '@salesforce/storefront-next-runtime/config';
 import type { AppConfig, BadgeDetail } from '@/types/config';
 import { useSite } from '@salesforce/storefront-next-runtime/site-context';
 import { getProductBadges } from '@/lib/product-badges';
+import { useMediaQuery } from '@/hooks/use-media-query';
 
 type ProductBadgesResult = { badges: BadgeDetail[]; hasBadges: boolean };
 
@@ -41,35 +42,11 @@ const ProductTileContext = createContext<ProductTileContextValue | null>(null);
 const DESKTOP_QUERY = `(min-width: ${defaultTheme.screens.lg})`;
 
 /**
- * Subscribes to viewport changes against tailwind's `lg` breakpoint (desktop device).
- * Returns an unsubscribe function.
- */
-function subscribeToDesktopQuery(callback: () => void) {
-    const mql = globalThis.matchMedia?.(DESKTOP_QUERY);
-    mql?.addEventListener('change', callback);
-    return () => mql?.removeEventListener('change', callback);
-}
-
-/**
- * Client snapshot: returns `'hover'` on desktop viewports, `'click'` on mobile.
- */
-function getSwatchModeSnapshot(): 'click' | 'hover' {
-    return globalThis.matchMedia?.(DESKTOP_QUERY)?.matches ? 'hover' : 'click';
-}
-
-/**
- * Server snapshot: always returns `'click'` since `matchMedia` is unavailable during SSR.
- */
-function getSwatchModeServerSnapshot(): 'click' | 'hover' {
-    return 'click';
-}
-
-/**
  * Determines swatch interaction mode (`'hover'` on desktop, `'click'` on mobile) via a single shared `matchMedia`
  * subscription. Hydration-safe through the server snapshot.
  */
 function useSwatchMode(): 'click' | 'hover' {
-    return useSyncExternalStore(subscribeToDesktopQuery, getSwatchModeSnapshot, getSwatchModeServerSnapshot);
+    return useMediaQuery(DESKTOP_QUERY) ? 'hover' : 'click';
 }
 
 /**
