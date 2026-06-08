@@ -68,7 +68,7 @@ export default function ProductView({ product }: ProductViewProps): ReactElement
 
     return (
         <ProductViewProvider product={product} mode="add">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-12">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-12">
                 {/* Left Column - Image Gallery + Description */}
                 <div className="order-1">
                     <ImageGallery
@@ -78,6 +78,7 @@ export default function ProductView({ product }: ProductViewProps): ReactElement
                         showNavigationArrows
                         navigationArrowSize="lg"
                         productName={product.name}
+                        enableZoom
                     />
                     <UITarget targetId="sfcc.pdp.agent.productHelper" />
                     {product.longDescription && product.longDescription !== product.shortDescription && (

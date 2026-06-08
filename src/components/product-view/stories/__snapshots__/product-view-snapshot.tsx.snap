@@ -6,7 +6,7 @@ exports[`ProductView stories snapshot > Default story renders and matches snapsh
     class="section-container py-4"
   >
     <div
-      class="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-12"
+      class="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-12"
     >
       <div
         class="order-1"
@@ -18,28 +18,42 @@ exports[`ProductView stories snapshot > Default story renders and matches snapsh
             class="relative aspect-square overflow-hidden rounded-none bg-muted"
           >
             <div
-              class="w-full h-full object-cover object-center [&_img]:object-contain! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
+              aria-label="Zoom product image"
+              aria-pressed="false"
+              class="relative h-full w-full overflow-hidden outline-none touch-pan-y"
+              role="button"
+              tabindex="0"
             >
-              <picture>
-                <source
-                  media="(min-width: 640px)"
-                  sizes="680px"
-                  srcset="https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=680 680w, https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=1360 1360w"
-                  type="image/webp"
-                />
-                <source
-                  sizes="100vw"
-                  srcset="https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=640 640w, https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=1280 1280w"
-                  type="image/webp"
-                />
-                <img
-                  alt="Men's Classic Deer Gloves, , large"
-                  class="object-cover"
-                  fetchpriority="high"
-                  loading="eager"
-                  src="https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70"
-                />
-              </picture>
+              <div
+                class="h-full w-full will-change-transform"
+                data-testid="product-image-zoom-transform"
+                style="--zoom-scale: 1; --zoom-translate-x: var(--zoom-x, 0px); --zoom-translate-y: var(--zoom-y, 0px); transform: translate(var(--zoom-translate-x), var(--zoom-translate-y)) scale(var(--zoom-scale));"
+              >
+                <div
+                  class="pointer-events-none w-full h-full object-cover object-center [&_img]:object-contain! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
+                >
+                  <picture>
+                    <source
+                      media="(min-width: 640px)"
+                      sizes="680px"
+                      srcset="https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=680 680w, https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=1360 1360w"
+                      type="image/webp"
+                    />
+                    <source
+                      sizes="100vw"
+                      srcset="https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=640 640w, https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70&sw=1280 1280w"
+                      type="image/webp"
+                    />
+                    <img
+                      alt="Men's Classic Deer Gloves, , large"
+                      class="object-cover"
+                      fetchpriority="high"
+                      loading="eager"
+                      src="https://edge.disstg.commercecloud.salesforce.com/dw/image/v2/ZZRF_001/on/demandware.static/-/Sites-apparel-m-catalog/default/dw5f194ed3/images/large/TG508_206.webp?sfrm=jpg&q=70"
+                    />
+                  </picture>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -557,15 +571,17 @@ exports[`ProductView stories snapshot > Default story renders and matches snapsh
           <div
             class="flex flex-col gap-3"
           >
-            <button
-              class="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive bg-primary text-primary-foreground hover:bg-primary/90 h-10 rounded-md px-6 has-[>svg]:px-4 w-full"
-              data-size="lg"
-              data-slot="button"
-              data-testid="add-to-cart"
-              data-variant="default"
-            >
-              Add to Cart
-            </button>
+            <div>
+              <button
+                class="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive bg-primary text-primary-foreground hover:bg-primary/90 h-10 rounded-md px-6 has-[>svg]:px-4 w-full"
+                data-size="lg"
+                data-slot="button"
+                data-testid="add-to-cart"
+                data-variant="default"
+              >
+                Add to Cart
+              </button>
+            </div>
             <div
               class="text-sm text-muted-foreground"
             >
