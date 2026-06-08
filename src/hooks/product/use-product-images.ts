@@ -15,7 +15,7 @@
  */
 import { useMemo } from 'react';
 import type { ShopperProducts } from '@salesforce/storefront-next-runtime/scapi';
-import type { GalleryImage } from '@/components/image-gallery';
+import type { ProductImage } from '@/components/image-gallery';
 import { findImageGroupBy } from '@/lib/image-groups-utils';
 import { toImageUrl } from '@/lib/dynamic-image';
 import { useConfig } from '@salesforce/storefront-next-runtime/config';
@@ -28,7 +28,7 @@ interface UseProductImagesProps {
 }
 
 interface UseProductImagesReturn {
-    galleryImages: GalleryImage[];
+    galleryImages: ProductImage[];
 }
 
 /**
@@ -96,8 +96,8 @@ export function useProductImages({
         return imageGroup?.images || getDefaultImages(product.imageGroups, viewType);
     }, [product.imageGroups, selectedAttributes, viewType]);
 
-    // Transform Commerce SDK images to GalleryImage format
-    const galleryImages: GalleryImage[] = useMemo(() => {
+    // Transform Commerce SDK images to ProductImage format
+    const galleryImages: ProductImage[] = useMemo(() => {
         if (!filteredImages || filteredImages.length === 0) {
             return [];
         }

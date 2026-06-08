@@ -28,6 +28,8 @@
     "selectAllOptions": "Select all your options above",
     "description": "Description",
     "imageAlt": "Product Image",
+    "zoomImage": "Zoom product image",
+    "exitImageZoom": "Exit product image zoom",
     "addingToCart": "Adding to Cart...",
     "addToCart": "Add to Cart",
     "moreOptions": "More Options",
