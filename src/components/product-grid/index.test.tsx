@@ -35,16 +35,19 @@ vi.mock('@/components/product-tile', () => ({
         topCategoryName,
         showPickupAvailable,
         handleProductClick,
+        enableImageCycler,
     }: {
         product: ShopperSearch.schemas['ProductSearchHit'];
         topCategoryName?: string;
         showPickupAvailable?: boolean;
         handleProductClick?: (p: ShopperSearch.schemas['ProductSearchHit']) => void;
+        enableImageCycler?: boolean;
     }) => (
         <div
             data-testid={`product-tile-${product.productId}`}
             data-top-category={topCategoryName ?? ''}
-            data-pickup={String(showPickupAvailable ?? false)}>
+            data-pickup={String(showPickupAvailable ?? false)}
+            data-image-cycler={String(enableImageCycler ?? false)}>
             <button onClick={() => handleProductClick?.(product)}>{product.productName}</button>
         </div>
     ),
@@ -137,6 +140,12 @@ describe('ProductGrid — critical products', () => {
         expect(screen.getByTestId('product-tile-p3')).toBeInTheDocument();
     });
 
+    test('enables image cycling for product-grid tiles', () => {
+        renderGrid({ critical: [p1] });
+
+        expect(screen.getByTestId('product-tile-p1')).toHaveAttribute('data-image-cycler', 'true');
+    });
+
     test('renders no tiles when critical is an empty array', () => {
         renderGrid({ critical: [] });
 
@@ -203,6 +212,7 @@ describe('ProductGrid — non-critical products', () => {
 
         expect(screen.getByTestId('product-tile-p1')).toBeInTheDocument();
         expect(screen.getByTestId('product-tile-p2')).toBeInTheDocument();
+        expect(screen.getByTestId('product-tile-p1')).toHaveAttribute('data-image-cycler', 'true');
         expect(screen.queryByTestId('product-tile-skeleton')).not.toBeInTheDocument();
     });
 
