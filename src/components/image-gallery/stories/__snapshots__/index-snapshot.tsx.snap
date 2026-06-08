@@ -131,3 +131,54 @@ exports[`ImageGallery stories snapshot > SingleImage story renders and matches s
   </div>
 </div>
 `;
+
+exports[`ImageGallery stories snapshot > ZoomEnabled story renders and matches snapshot 1`] = `
+<div>
+  <div
+    class="space-y-4"
+  >
+    <div
+      class="relative aspect-square overflow-hidden rounded-none bg-muted"
+    >
+      <div
+        aria-label="Zoom product image"
+        aria-pressed="false"
+        class="relative h-full w-full overflow-hidden outline-none touch-pan-y"
+        role="button"
+        tabindex="0"
+      >
+        <div
+          class="h-full w-full will-change-transform"
+          data-testid="product-image-zoom-transform"
+          style="--zoom-scale: 1; --zoom-translate-x: var(--zoom-x, 0px); --zoom-translate-y: var(--zoom-y, 0px); transform: translate(var(--zoom-translate-x), var(--zoom-translate-y)) scale(var(--zoom-scale));"
+        >
+          <div
+            class="pointer-events-none w-full h-full object-cover object-center [&_img]:object-contain! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
+          >
+            <picture>
+              <source
+                media="(min-width: 640px)"
+                sizes="680px"
+                srcset="https://zzrf-001.dx.commercecloud.salesforce.com/on/demandware.static/-/Sites-apparel-m-catalog/default/dwbeefee44/images/large/P0048_001.webp?sw=680&q=70&sfrm=jpg 680w, https://zzrf-001.dx.commercecloud.salesforce.com/on/demandware.static/-/Sites-apparel-m-catalog/default/dwbeefee44/images/large/P0048_001.webp?sw=1360&q=70&sfrm=jpg 1360w"
+                type="image/webp"
+              />
+              <source
+                sizes="100vw"
+                srcset="https://zzrf-001.dx.commercecloud.salesforce.com/on/demandware.static/-/Sites-apparel-m-catalog/default/dwbeefee44/images/large/P0048_001.webp?sw=640&q=70&sfrm=jpg 640w, https://zzrf-001.dx.commercecloud.salesforce.com/on/demandware.static/-/Sites-apparel-m-catalog/default/dwbeefee44/images/large/P0048_001.webp?sw=1280&q=70&sfrm=jpg 1280w"
+                type="image/webp"
+              />
+              <img
+                alt="Laptop Briefcase with wheels (37L), , large"
+                class="object-cover"
+                fetchpriority="high"
+                loading="eager"
+                src="https://zzrf-001.dx.commercecloud.salesforce.com/on/demandware.static/-/Sites-apparel-m-catalog/default/dwbeefee44/images/large/P0048_001.jpg"
+              />
+            </picture>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+`;

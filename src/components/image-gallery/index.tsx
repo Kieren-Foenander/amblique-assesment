@@ -20,15 +20,16 @@ import ImageNavArrows from '@/components/image-nav-arrows';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { UITarget } from '@/targets/ui-target';
+import ProductImageZoom from '@/components/product-image-zoom';
 
-export interface GalleryImage {
+export interface ProductImage {
     src: string;
     alt?: string;
     thumbSrc?: string;
 }
 
 interface ImageGalleryProps {
-    images: GalleryImage[];
+    images: ProductImage[];
     eager?: boolean;
     /** Show prev/next arrows on the main image (e.g. in modal) */
     showNavigationArrows?: boolean;
@@ -37,6 +38,8 @@ interface ImageGalleryProps {
     /** Use horizontal scrollable thumbnail strip with arrows instead of grid */
     horizontalThumbnails?: boolean;
     productName?: string;
+    /** Enhance the primary image with PDP zoom interactions */
+    enableZoom?: boolean;
 }
 
 const THUMBNAIL_SCROLL_OFFSET = 200;
@@ -48,6 +51,7 @@ export default function ImageGallery({
     navigationArrowSize = 'sm',
     horizontalThumbnails = false,
     productName,
+    enableZoom = false,
 }: ImageGalleryProps): ReactElement {
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
     const thumbStripRef = useRef<HTMLDivElement>(null);
@@ -99,19 +103,30 @@ export default function ImageGallery({
             <div className="space-y-4">
                 {/* Main Image */}
                 <div className="relative aspect-square overflow-hidden rounded-none bg-muted">
-                    <DynamicImage
-                        src={`${selectedImage.src}[?sw={width}]`}
-                        alt={selectedImage.alt || imageAltFallback}
-                        widths={['100vw', '680px']}
-                        className="w-full h-full object-cover object-center [&_img]:object-contain! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
-                        loading={eager ? 'eager' : 'lazy'}
-                        priority={eager ? 'high' : undefined}
-                    />
+                    {enableZoom ? (
+                        <ProductImageZoom
+                            key={selectedImageIndex}
+                            images={images}
+                            selectedImageIndex={selectedImageIndex}
+                            imageAltFallback={imageAltFallback}
+                            eager={eager}
+                        />
+                    ) : (
+                        <DynamicImage
+                            src={`${selectedImage.src}[?sw={width}]`}
+                            alt={selectedImage.alt || imageAltFallback}
+                            widths={['100vw', '680px']}
+                            className="w-full h-full object-cover object-center [&_img]:object-contain! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
+                            loading={eager ? 'eager' : 'lazy'}
+                            priority={eager ? 'high' : undefined}
+                        />
+                    )}
                     {showNavigationArrows && images.length > 1 && (
                         <ImageNavArrows
                             imageCount={images.length}
                             onIndexChange={setSelectedImageIndex}
                             size={navigationArrowSize}
+                            className="z-10"
                         />
                     )}
                 </div>

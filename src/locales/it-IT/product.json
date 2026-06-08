@@ -31,6 +31,8 @@
     "faqQuestionSendToAssistantAriaLabel": "Apri lo Shopper Agent e chiedi: {{question}}",
     "description": "Descrizione",
     "imageAlt": "Immagine prodotto",
+    "zoomImage": "Ingrandisci immagine prodotto",
+    "exitImageZoom": "Esci dallo zoom immagine prodotto",
     "addingToCart": "Aggiunta al carrello in corso...",
     "addToCart": "Aggiungi al carrello",
     "moreOptions": "Altre opzioni",

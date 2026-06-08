@@ -229,6 +229,10 @@ Image gallery with eager loading for above-the-fold content.
     },
 };
 
+export const ZoomEnabled: Story = {
+    render: () => <ImageGallery images={mockImages} eager enableZoom showNavigationArrows navigationArrowSize="lg" />,
+};
+
 export const Empty: Story = {
     render: () => <ImageGallery images={[]} />,
     parameters: {

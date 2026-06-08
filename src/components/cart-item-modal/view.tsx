@@ -18,7 +18,7 @@ import type { ShopperProducts } from '@salesforce/storefront-next-runtime/scapi'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Link } from '@/components/link';
-import ImageGallery, { type GalleryImage } from '@/components/image-gallery';
+import ImageGallery, { type ProductImage } from '@/components/image-gallery';
 import ProductInfo from '@/components/product-view/product-info';
 import ProductCartActions from '@/components/product-cart-actions';
 import ProductViewProvider from '@/providers/product-view';
@@ -46,7 +46,7 @@ interface CartItemModalViewProps {
     isVariantInventoryLoading?: boolean;
     variationValues: Record<string, string>;
     onAttributeChange: (attributeId: string, value: string) => void;
-    galleryImages: GalleryImage[];
+    galleryImages: ProductImage[];
     isProductASet: boolean;
     isProductABundle: boolean;
     onBeforeCartAction: () => void;
