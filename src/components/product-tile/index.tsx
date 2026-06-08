@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { forwardRef, type ComponentProps, useState, useCallback, useMemo, useEffect, lazy, Suspense } from 'react';
+import { type ComponentProps, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Link } from '@/components/link';
 
 import type { ShopperSearch } from '@salesforce/storefront-next-runtime/scapi';
@@ -41,6 +41,7 @@ import { StarRating } from '@/components/product-ratings/star-rating';
 import { UITarget } from '@/targets/ui-target';
 import { Card } from '@/components/ui/card';
 import { loader as loaders } from './loaders';
+import { ProductImageCycler } from './product-image-cycler';
 
 const LazySwatches = lazy(() => import('./swatches').then((m) => ({ default: m.ProductTileSwatches })));
 
@@ -255,6 +256,8 @@ export interface ProductTileProps extends ComponentProps<'div'> {
     topCategoryName?: string;
     /** Accepted for API compatibility; has no effect */
     showNavigationArrows?: boolean;
+    /** Enable hover/swipe image cycling progressive enhancement */
+    enableImageCycler?: boolean;
 
     // Page Designer styling props
     objectFit?: 'contain' | 'cover' | 'fill' | 'none' | 'scale-down';
@@ -274,133 +277,134 @@ export interface ProductTileProps extends ComponentProps<'div'> {
     data?: unknown;
 }
 
-const ProductTile = forwardRef<HTMLDivElement, ProductTileProps>(
-    (
-        {
-            className,
-            product: productProp,
-            productId: _productId,
-            maxSwatches = PRODUCT_TILE_MAX_SWATCHES,
-            selectedVariantColorValue,
-            handleProductClick,
-            imgAspectRatio,
-            showPickupAvailable = false,
-            quickAddLabel,
-            topCategoryName,
-            showNavigationArrows: _showNavigationArrows,
-            // Page Designer styling props
-            objectFit,
-            borderRadius,
-            boxShadow,
-            padding,
-            margin,
-            fontWeight,
-            letterSpacing,
-            hoverEffect,
-            // Page Designer system props (filter out)
-            regionId: _regionId,
-            component: _component,
-            componentData: _componentData,
-            designMetadata: _designMetadata,
-            data,
-            ...props
-        },
-        ref
-    ) => {
-        // Prioritize loader data (Page Designer) over prop (programmatic use)
-        const product = (data as ShopperSearch.schemas['ProductSearchHit'] | undefined) || productProp;
+function ProductTile({
+    className,
+    product: productProp,
+    productId: _productId,
+    maxSwatches = PRODUCT_TILE_MAX_SWATCHES,
+    selectedVariantColorValue,
+    handleProductClick,
+    imgAspectRatio,
+    showPickupAvailable = false,
+    quickAddLabel,
+    topCategoryName,
+    showNavigationArrows: _showNavigationArrows,
+    enableImageCycler = false,
+    // Page Designer styling props
+    objectFit,
+    borderRadius,
+    boxShadow,
+    padding,
+    margin,
+    fontWeight,
+    letterSpacing,
+    hoverEffect,
+    // Page Designer system props (filter out)
+    regionId: _regionId,
+    component: _component,
+    componentData: _componentData,
+    designMetadata: _designMetadata,
+    data,
+    ref,
+    ...props
+}: ProductTileProps) {
+    // Prioritize loader data (Page Designer) over prop (programmatic use)
+    const product = (data as ShopperSearch.schemas['ProductSearchHit'] | undefined) || productProp;
 
-        const { config, t, currency, getBadges, swatchMode } = useProductTileContext();
+    const { config, t, currency, getBadges, swatchMode } = useProductTileContext();
 
-        const productData = useMemo(() => {
-            if (!product) return null;
-            return {
-                badges: getBadges(product),
-                rating: getProductRating(product),
-            };
-        }, [product, getBadges]);
+    const productData = useMemo(() => {
+        if (!product) return null;
+        return {
+            badges: getBadges(product),
+            rating: getProductRating(product),
+        };
+    }, [product, getBadges]);
 
-        const effectiveImgAspectRatio = imgAspectRatio ?? config.global.productListing.defaultProductTileImgAspectRatio;
+    const effectiveImgAspectRatio = imgAspectRatio ?? config.global.productListing.defaultProductTileImgAspectRatio;
 
-        const isMasterProd = !!product?.variants;
-        const initialVariationValue =
-            selectedVariantColorValue !== undefined && selectedVariantColorValue !== null
-                ? selectedVariantColorValue
-                : isMasterProd && !!product?.representedProduct
-                  ? product?.variants?.find((variant) => variant?.productId == product?.representedProduct?.id)
-                        ?.variationValues?.[PRODUCT_TILE_SELECTABLE_ATTRIBUTE_ID]
-                  : undefined;
+    const isMasterProd = !!product?.variants;
+    const initialVariationValue =
+        isMasterProd && !!product?.representedProduct
+            ? product?.variants?.find((variant) => variant?.productId == product?.representedProduct?.id)
+                  ?.variationValues?.[PRODUCT_TILE_SELECTABLE_ATTRIBUTE_ID]
+            : undefined;
 
-        // Local swatch selection state — drives image switching and selected ring on swatches.
-        // Initialized from the URL-driven prop; updates when the user clicks a swatch on the tile.
-        const [selectedAttributeValue, setSelectedAttributeValue] = useState<string | null>(
-            initialVariationValue || null
-        );
+    // Local swatch selection state — drives image switching and selected ring on swatches.
+    // The URL-driven prop takes precedence and is derived during render to avoid stale UI.
+    const [localSelectedAttributeValue, setLocalSelectedAttributeValue] = useState<string | null>(
+        initialVariationValue || null
+    );
+    const selectedAttributeValue = selectedVariantColorValue ?? localSelectedAttributeValue;
 
-        useEffect(() => {
-            if (selectedVariantColorValue !== undefined && selectedVariantColorValue !== null) {
-                setSelectedAttributeValue(selectedVariantColorValue);
+    const variationAttributes = useMemo(() => (product ? getDecoratedVariationAttributes(product) : []), [product]);
+    const colorAttributes = variationAttributes.filter(({ id }) => PRODUCT_TILE_SELECTABLE_ATTRIBUTE_ID === id);
+    const colorValues = (colorAttributes[0]?.values?.slice(0, maxSwatches) ?? []) as DecoratedVariationAttributeValue[];
+
+    const handleSwatchHover = useCallback(
+        (value: string) => {
+            if (swatchMode === 'hover') {
+                setLocalSelectedAttributeValue(value);
             }
-        }, [selectedVariantColorValue]);
+        },
+        [swatchMode]
+    );
+    const handleClick = useCallback(() => {
+        product && handleProductClick?.(product);
+    }, [handleProductClick, product]);
 
-        const variationAttributes = useMemo(() => (product ? getDecoratedVariationAttributes(product) : []), [product]);
-        const colorAttributes = variationAttributes.filter(({ id }) => PRODUCT_TILE_SELECTABLE_ATTRIBUTE_ID === id);
-        const colorValues = (colorAttributes[0]?.values?.slice(0, maxSwatches) ??
-            []) as DecoratedVariationAttributeValue[];
+    const productUrl = createProductUrl(product?.productId ?? '');
+    const productName = product?.productName ?? '';
 
-        const handleSwatchHover = useCallback(
-            (value: string) => {
-                if (swatchMode === 'hover') {
-                    setSelectedAttributeValue(value);
-                }
-            },
-            [swatchMode]
-        );
-        const handleClick = useCallback(() => {
-            product && handleProductClick?.(product);
-        }, [handleProductClick, product]);
+    const pageDesignerStyles = getPageDesignerStyleClasses({
+        objectFit,
+        borderRadius,
+        boxShadow,
+        padding,
+        margin,
+        fontWeight,
+        letterSpacing,
+        hoverEffect,
+    });
 
-        const productUrl = createProductUrl(product?.productId ?? '');
-        const productName = product?.productName ?? '';
-
-        const pageDesignerStyles = getPageDesignerStyleClasses({
-            objectFit,
-            borderRadius,
-            boxShadow,
-            padding,
-            margin,
-            fontWeight,
-            letterSpacing,
-            hoverEffect,
-        });
-
-        if (!product) {
-            return (
-                <Card
-                    ref={ref}
-                    className={cn(
-                        'product-card group w-full min-w-0 max-w-full overflow-hidden gap-0 py-0 !rounded-none !border-0 !shadow-none',
-                        pageDesignerStyles,
-                        className
-                    )}
-                    {...props}>
-                    <div className="p-4 text-sm text-muted-foreground">{t('selectProduct')}</div>
-                </Card>
-            );
-        }
-
+    if (!product) {
         return (
             <Card
                 ref={ref}
                 className={cn(
-                    'product-card group w-full min-w-0 max-w-full cursor-pointer overflow-hidden gap-0 py-0 !rounded-none !border-0 !shadow-none',
+                    'product-card group w-full min-w-0 max-w-full overflow-hidden gap-0 py-0 !rounded-none !border-0 !shadow-none',
                     pageDesignerStyles,
                     className
                 )}
                 {...props}>
-                {/* Image area */}
-                <div className="product-image relative">
-                    <div className="relative w-full overflow-hidden">
+                <div className="p-4 text-sm text-muted-foreground">{t('selectProduct')}</div>
+            </Card>
+        );
+    }
+
+    return (
+        <Card
+            ref={ref}
+            className={cn(
+                'product-card group w-full min-w-0 max-w-full cursor-pointer overflow-hidden gap-0 py-0 !rounded-none !border-0 !shadow-none',
+                pageDesignerStyles,
+                className
+            )}
+            {...props}>
+            {/* Image area */}
+            <div className="product-image relative">
+                <div className="relative w-full overflow-hidden">
+                    {enableImageCycler ? (
+                        <ProductImageCycler
+                            product={product}
+                            selectedColorValue={
+                                PRODUCT_TILE_SELECTABLE_ATTRIBUTE_ID === 'color' ? selectedAttributeValue : null
+                            }
+                            imgAspectRatio={effectiveImgAspectRatio}
+                            className="w-full aspect-square [&_img]:object-cover! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
+                            handleProductClick={handleProductClick}
+                        />
+                    ) : (
                         <ProductImageContainer
                             product={product}
                             selectedColorValue={
@@ -410,9 +414,11 @@ const ProductTile = forwardRef<HTMLDivElement, ProductTileProps>(
                             className="w-full aspect-square [&_img]:object-cover! [&_img]:h-full! [&_img]:max-w-full! [&_img]:mx-auto!"
                             handleProductClick={handleProductClick}
                         />
-                        <UITarget targetId="sfcc.plp.shipping.deliveryEstimate" />
+                    )}
+                    <UITarget targetId="sfcc.plp.shipping.deliveryEstimate" />
 
-                        {/* Clickable product link overlay */}
+                    {/* Clickable product link overlay */}
+                    {!enableImageCycler && (
                         <Link
                             to={productUrl}
                             className="absolute inset-0 z-[1] cursor-pointer"
@@ -420,149 +426,145 @@ const ProductTile = forwardRef<HTMLDivElement, ProductTileProps>(
                             onClick={handleClick}
                             tabIndex={-1}
                         />
+                    )}
 
-                        {/* Badges — top-left */}
-                        {productData?.badges.hasBadges && (
-                            <div className="absolute top-2 left-2 flex flex-col items-start gap-1 z-20">
-                                {productData.badges.badges.map((badge) => (
-                                    <span
-                                        key={badge.label}
-                                        className="px-2 py-1 text-xs font-semibold uppercase inline-block bg-foreground text-background leading-none">
-                                        {badge.label}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                    {/* Badges — top-left */}
+                    {productData?.badges.hasBadges && (
+                        <div className="absolute top-2 left-2 flex flex-col items-start gap-1 z-20">
+                            {productData.badges.badges.map((badge) => (
+                                <span
+                                    key={badge.label}
+                                    className="px-2 py-1 text-xs font-semibold uppercase inline-block bg-foreground text-background leading-none">
+                                    {badge.label}
+                                </span>
+                            ))}
+                        </div>
+                    )}
 
-                        {/* Action icons — top-right */}
-                        <div className="absolute top-2 right-2 flex flex-col items-end gap-2 z-20">
-                            {showPickupAvailable && (
-                                <div>
-                                    <div className="group/pickup relative" data-testid="pickup-available-indicator">
-                                        <div className="w-9 h-9 p-2 bg-muted text-muted-foreground flex items-center justify-center">
-                                            <PickupIcon className="w-4 h-4" />
-                                        </div>
-                                        <div className="absolute right-0 top-full mt-1 z-50 opacity-0 group-hover/pickup:opacity-100 transition-opacity duration-200 pointer-events-none">
-                                            <div className="bg-foreground text-background text-xs font-medium px-2 py-1 whitespace-nowrap shadow-lg">
-                                                {t('pickupAvailable')}
-                                            </div>
+                    {/* Action icons — top-right */}
+                    <div className="absolute top-2 right-2 flex flex-col items-end gap-2 z-20">
+                        {showPickupAvailable && (
+                            <div>
+                                <div className="group/pickup relative" data-testid="pickup-available-indicator">
+                                    <div className="w-9 h-9 p-2 bg-muted text-muted-foreground flex items-center justify-center">
+                                        <PickupIcon className="w-4 h-4" />
+                                    </div>
+                                    <div className="absolute right-0 top-full mt-1 z-50 opacity-0 group-hover/pickup:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                        <div className="bg-foreground text-background text-xs font-medium px-2 py-1 whitespace-nowrap shadow-lg">
+                                            {t('pickupAvailable')}
                                         </div>
                                     </div>
                                 </div>
-                            )}
-
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <DeferredWishlistButton
-                                    product={product}
-                                    size="sm"
-                                    tabIndex={-1}
-                                    className="relative top-auto right-auto z-20 bg-muted hover:bg-background shadow-sm !border-0"
-                                />
                             </div>
-                        </div>
+                        )}
 
-                        {/* Hover overlay — subtle dark tint */}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-opacity duration-300 pointer-events-none" />
-
-                        {/* Quick Add button */}
-                        <div className="absolute bottom-4 left-0 right-0 px-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300 z-20">
-                            <QuickAddButton
-                                productId={product.productId ?? ''}
-                                productName={productName}
-                                selectedColorValue={selectedAttributeValue}
-                                label={quickAddLabel ?? t('quickAdd')}
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <DeferredWishlistButton
+                                product={product}
+                                size="sm"
+                                tabIndex={-1}
+                                className="relative top-auto right-auto z-20 bg-muted hover:bg-background shadow-sm !border-0"
                             />
                         </div>
                     </div>
-                </div>
 
-                {/* Info section */}
-                <div className="relative p-4">
-                    {/* Color swatches */}
-                    {colorValues.length > 0 && (
-                        <div>
-                            <Suspense fallback={<ProductTileSwatchesSkeleton count={maxSwatches} />}>
-                                <LazySwatches
-                                    colorValues={colorValues}
-                                    selectedAttributeValue={selectedAttributeValue}
-                                    onSwatchHover={handleSwatchHover}
-                                    onSwatchClick={handleClick}
-                                    productName={productName}
-                                    totalColorCount={colorAttributes[0]?.values?.length ?? colorValues.length}
-                                    maxSwatches={maxSwatches}
-                                    productHref={productUrl}
-                                />
-                            </Suspense>
-                        </div>
-                    )}
+                    {/* Hover overlay — subtle dark tint */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-opacity duration-300 pointer-events-none" />
 
-                    {/* Store name */}
-                    <p className="text-xs text-muted-foreground mb-1">{config.global.branding.name}</p>
-
-                    {/* Top category */}
-                    {topCategoryName && (
-                        <p className="text-xs text-muted-foreground mb-1 uppercase">{topCategoryName}</p>
-                    )}
-
-                    {/* Product name — the single keyboard/SR tab stop for this tile */}
-                    <h3 className="text-sm font-medium text-card-foreground mb-2">
-                        <Link
-                            to={productUrl}
-                            className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-none"
-                            onClick={handleClick}>
-                            {productName}
-                        </Link>
-                    </h3>
-
-                    {/* SKU */}
-                    {product.productId && (
-                        <p className="text-xs text-muted-foreground mb-1" data-testid="product-tile-sku">
-                            {t('sku')} {product.productId}
-                        </p>
-                    )}
-
-                    {/* Star ratings */}
-                    <div className="mb-2">
-                        <StarRating
-                            rating={productData?.rating.rating ?? 0}
-                            reviewCount={productData?.rating.reviewCount ?? 0}
-                            starSize="sm"
-                            starClassName="text-foreground"
-                            showRatingLink
-                            ratingLinkTemplate="({count})"
-                            ratingLinkClassName="text-xs text-muted-foreground"
+                    {/* Quick Add button */}
+                    <div className="absolute bottom-4 left-0 right-0 px-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300 z-20">
+                        <QuickAddButton
+                            productId={product.productId ?? ''}
+                            productName={productName}
+                            selectedColorValue={selectedAttributeValue}
+                            label={quickAddLabel ?? t('quickAdd')}
                         />
                     </div>
-                    <UITarget targetId="sfcc.productCard.reviews.rating" />
+                </div>
+            </div>
 
-                    {/* Price */}
+            {/* Info section */}
+            <div className="relative p-4">
+                {/* Color swatches */}
+                {colorValues.length > 0 && (
                     <div>
-                        <ProductPrice
-                            type="unit"
-                            product={product}
-                            currency={currency ?? config.commerce.sites?.[0]?.defaultCurrency ?? ''}
-                            labelForA11y={(product?.productName ?? product?.productId) || ''}
-                            currentPriceProps={{
-                                className: 'text-base font-semibold text-card-foreground',
-                            }}
-                            listPriceProps={{
-                                className: 'text-muted-foreground text-sm leading-none line-through',
-                            }}
-                            promoCalloutProps={{
-                                className: 'text-xs text-active-foreground mt-1',
-                            }}
-                            className="text-sm"
-                        />
+                        <Suspense fallback={<ProductTileSwatchesSkeleton count={maxSwatches} />}>
+                            <LazySwatches
+                                colorValues={colorValues}
+                                selectedAttributeValue={selectedAttributeValue}
+                                onSwatchHover={handleSwatchHover}
+                                onSwatchClick={handleClick}
+                                productName={productName}
+                                totalColorCount={colorAttributes[0]?.values?.length ?? colorValues.length}
+                                maxSwatches={maxSwatches}
+                                productHref={productUrl}
+                            />
+                        </Suspense>
                     </div>
-                    <UITarget targetId="sfcc.productCard.loyalty.points" />
-                    <UITarget targetId="sfcc.productCard.bnpl.message" />
-                </div>
-            </Card>
-        );
-    }
-);
+                )}
 
-ProductTile.displayName = 'ProductTile';
+                {/* Store name */}
+                <p className="text-xs text-muted-foreground mb-1">{config.global.branding.name}</p>
+
+                {/* Top category */}
+                {topCategoryName && <p className="text-xs text-muted-foreground mb-1 uppercase">{topCategoryName}</p>}
+
+                {/* Product name — the single keyboard/SR tab stop for this tile */}
+                <h3 className="text-sm font-medium text-card-foreground mb-2">
+                    <Link
+                        to={productUrl}
+                        className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-none"
+                        onClick={handleClick}>
+                        {productName}
+                    </Link>
+                </h3>
+
+                {/* SKU */}
+                {product.productId && (
+                    <p className="text-xs text-muted-foreground mb-1" data-testid="product-tile-sku">
+                        {t('sku')} {product.productId}
+                    </p>
+                )}
+
+                {/* Star ratings */}
+                <div className="mb-2">
+                    <StarRating
+                        rating={productData?.rating.rating ?? 0}
+                        reviewCount={productData?.rating.reviewCount ?? 0}
+                        starSize="sm"
+                        starClassName="text-foreground"
+                        showRatingLink
+                        ratingLinkTemplate="({count})"
+                        ratingLinkClassName="text-xs text-muted-foreground"
+                    />
+                </div>
+                <UITarget targetId="sfcc.productCard.reviews.rating" />
+
+                {/* Price */}
+                <div>
+                    <ProductPrice
+                        type="unit"
+                        product={product}
+                        currency={currency ?? config.commerce.sites?.[0]?.defaultCurrency ?? ''}
+                        labelForA11y={(product?.productName ?? product?.productId) || ''}
+                        currentPriceProps={{
+                            className: 'text-base font-semibold text-card-foreground',
+                        }}
+                        listPriceProps={{
+                            className: 'text-muted-foreground text-sm leading-none line-through',
+                        }}
+                        promoCalloutProps={{
+                            className: 'text-xs text-active-foreground mt-1',
+                        }}
+                        className="text-sm"
+                    />
+                </div>
+                <UITarget targetId="sfcc.productCard.loyalty.points" />
+                <UITarget targetId="sfcc.productCard.bnpl.message" />
+            </div>
+        </Card>
+    );
+}
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const loader = loaders.server;

@@ -86,7 +86,7 @@ function NonCriticalContent({
                     key={product.productId}
                     product={product}
                     handleProductClick={handleProductClick}
-                    showNavigationArrows
+                    enableImageCycler
                     topCategoryName={topCategoryName}
                     // @sfdc-extension-line SFDC_EXT_BOPIS
                     showPickupAvailable={showPickupAvailable}
@@ -187,7 +187,7 @@ export default function ProductGrid({
                                 key={product.productId}
                                 product={product}
                                 handleProductClick={handleProductClick}
-                                showNavigationArrows
+                                enableImageCycler
                                 topCategoryName={topCategoryName}
                                 // @sfdc-extension-line SFDC_EXT_BOPIS
                                 showPickupAvailable={showPickupAvailable}
